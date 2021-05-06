@@ -1,0 +1,97 @@
+﻿#pragma kernel CSMain
+
+RWTexture3D<float> _VolumeTexture;
+int _Resolution, _Steps;
+float _Smoothness, _Seed;
+float _DisplacementScale, _DisplacementSpread;
+
+float3 Hash(float2 p)
+{
+	float3 q = float3( dot(p,float2(127.1,311.7)), dot(p,float2(269.5,183.3)), dot(p,float2(419.2,371.9)) );
+	return frac(sin(q)*43758.5453);
+}
+
+float3 Noise(float2 p)
+{
+	float2 ip = floor(p);
+	float2 u = frac(p);
+	u = u*u*(3.0-2.0*u);
+	float3 res = lerp(lerp(Hash(ip),Hash(ip+float2(1,0)),u.x), lerp(Hash(ip+float2(0,1)),Hash(ip+float2(1,1)),u.x),u.y);
+	return res*res;
+}
+
+float3 FBM(float2 x)
+{
+	float3 v = (float3) 0.0;
+	float3 a = (float3) 0.5;
+	float2x2 rot = float2x2(0.87, 0.48, -0.48, 0.87);
+	for (int i = 0; i < 6; ++i) 
+	{
+		v += a * Noise(x);
+		x = mul(rot, x * 2.0 + float2(100,100));
+		a *= 0.5;
+	}
+	return v;
+}
+
+float3 HeightMap (float2 uv)
+{
+	return FBM(_DisplacementSpread * uv);
+}
+
+float RockSDF (float3 p, int steps, float seed, float smoothness) 
+{
+	float d = length(p) - 0.95;
+	for(int i = 0; i < steps; i++)
+	{
+		float j = float(i) + seed;
+		float r = 2.5 + frac(sin(j * 727.1)*435.545);
+		float3 v = normalize(frac(sin(float3(127.231, 491.7, 718.423) * j) * 435.543) * 2.0 - 1.0);
+		float a = d;
+		float b = length(p + v * r) - r * 0.8;
+		float k = smoothness;
+		float h = clamp(0.5 + 0.5 * (-b - a) / k, 0.0, 1.0);
+		d = lerp(a, -b, h) + k * h * (1.0 - h);
+	}
+	return d;
+}
+
+float Map (float3 p)
+{
+	return RockSDF(p * 2.0, _Steps, _Seed, _Smoothness);
+}
+
+float3 NormalMap( float3 p )
+{
+	float2 eps = float2(0.0001, 0.0);
+	float3 result = float3(0,0,0);
+	result.x = Map(p + eps.xyy) - Map(p - eps.xyy);
+	result.y = Map(p + eps.yxy) - Map(p - eps.yxy);
+	result.z = Map(p + eps.yyx) - Map(p - eps.yyx);
+	return normalize(result);
+}
+
+float3 Surface3D( float3 p, float3 n )
+{
+	n = max(n * n, 0.001);
+	n /= (n.x + n.y + n.z );
+	return (HeightMap(p.yz) * n.x + HeightMap(p.zx) * n.y + HeightMap(p.xy) * n.z).xyz;
+}
+
+float ScalarField (float3 p)
+{
+	float d = 0.0;
+	if (_DisplacementScale > 0.0)
+		d = Map(p) + _DisplacementScale * length(Surface3D(p,NormalMap(p)));
+	else
+		d = Map(p);
+	return smoothstep(0.05, 0.0, d);
+}
+
+[numthreads(8,8,8)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+	float3 texcoord = float3((float)id.x/_Resolution, (float)id.y/_Resolution, (float)id.z/_Resolution);
+	float3 position = texcoord - float3(0.5, 0.5, 0.5);
+	_VolumeTexture[id] = ScalarField(position); 
+}
