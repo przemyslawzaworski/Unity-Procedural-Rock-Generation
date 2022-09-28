@@ -18,7 +18,7 @@ public class ProceduralRockGenerator : MonoBehaviour
 	[Range(8, 72)]
 	public int Steps = 20;
 	[Range(0.01f, 0.2f)]
-	public float Smoothness = 0.05f;	
+	public float Smoothness = 0.05f;
 	[Range(0.0f, 1000.0f)]
 	public float Seed = 880.0f;
 	[Range(0.0f, 1.0f)]
@@ -27,12 +27,14 @@ public class ProceduralRockGenerator : MonoBehaviour
 	public float DisplacementSpread = 10.0f;
 	public bool ShowNormals = true;
 	public bool Wireframe = false;
+	public bool GeneratePerTriangleUV = true;
 
 	Material _Material;
 	RenderTexture _VolumeTexture;
 	ComputeBuffer _TriangleBuffer;
 	ComputeBuffer _IndirectBuffer;
-	int _Count, _CurrentResolution;
+	ComputeBuffer _CounterBuffer;
+	int _CurrentResolution;
 	string _Hash { get {return System.Guid.NewGuid().ToString("N");} }
 
 	struct Point
@@ -59,6 +61,7 @@ public class ProceduralRockGenerator : MonoBehaviour
 		_CurrentResolution = Resolution;
 		_TriangleBuffer = new ComputeBuffer(MaxVertexCount, sizeof(float) * 27, ComputeBufferType.Append);
 		_IndirectBuffer = new ComputeBuffer(4, sizeof(int), ComputeBufferType.IndirectArguments);
+		_CounterBuffer = new ComputeBuffer(1, 4, ComputeBufferType.Counter);
 		TriangulationCS.SetFloat("_Threshold", 0.5f);
 	}
 
@@ -70,12 +73,47 @@ public class ProceduralRockGenerator : MonoBehaviour
 		}
 	}
 
+	Vector2[] CubeProjection (List<Vector3> vertices, List<int> triangles)
+	{
+		Vector2[] uvs = new Vector2[vertices.Count];
+		for (int i = 0; i < triangles.Count; i += 3)
+		{
+			Vector3 a = vertices[triangles[i + 0]] / Scale + new Vector3(0.5f, 0.5f, 0.5f);
+			Vector3 b = vertices[triangles[i + 1]] / Scale + new Vector3(0.5f, 0.5f, 0.5f);
+			Vector3 c = vertices[triangles[i + 2]] / Scale + new Vector3(0.5f, 0.5f, 0.5f);
+			Vector3 n = Vector3.Cross(b - a, c - a);
+			n = new Vector3(Mathf.Abs(n.normalized.x), Mathf.Abs(n.normalized.y), Mathf.Abs(n.normalized.z));
+			if (n.x > n.y && n.x > n.z)
+			{
+				uvs[triangles[i + 0]] = new Vector2(a.z, a.y);
+				uvs[triangles[i + 1]] = new Vector2(b.z, b.y);
+				uvs[triangles[i + 2]] = new Vector2(c.z, c.y);
+			}
+			else if (n.y > n.x && n.y > n.z)
+			{
+				uvs[triangles[i + 0]] = new Vector2(a.x, a.z);
+				uvs[triangles[i + 1]] = new Vector2(b.x, b.z);
+				uvs[triangles[i + 2]] = new Vector2(c.x, c.z);
+			}
+			else if (n.z > n.x && n.z > n.y)
+			{
+				uvs[triangles[i + 0]] = new Vector2(a.x, a.y);
+				uvs[triangles[i + 1]] = new Vector2(b.x, b.y);
+				uvs[triangles[i + 2]] = new Vector2(c.x, c.y);
+			}
+		}
+		return uvs;
+	}
+
 	public void Export()
 	{
+		if (_TriangleBuffer == null || _IndirectBuffer == null) return;
+		int[] data = new int[4];
+		_IndirectBuffer.GetData(data);
+		int count = data[0];
 		Mesh mesh = new Mesh();
 		mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-		Point[] points = new Point[_Count];
-		if (_TriangleBuffer == null) return;
+		Point[] points = new Point[count];
 		_TriangleBuffer.GetData(points);
 		List<Vector3> vertices = new List<Vector3>();
 		List<int> triangles = new List<int>();
@@ -92,6 +130,7 @@ public class ProceduralRockGenerator : MonoBehaviour
 		mesh.triangles = triangles.ToArray();
 		mesh.normals = normals.ToArray();
 		mesh.colors = colors.ToArray();
+		if (GeneratePerTriangleUV) mesh.uv = CubeProjection(vertices, triangles);
 		CheckPath("Meshes");
 		string fileName = _Hash;
 		AssetDatabase.CreateAsset(mesh, "Assets/Meshes/" + fileName + ".asset");
@@ -127,28 +166,27 @@ public class ProceduralRockGenerator : MonoBehaviour
 		TriangulationCS.SetInt("_Resolution", Resolution);
 		TriangulationCS.SetTexture(0, "_VolumeTexture", _VolumeTexture);
 		TriangulationCS.SetBuffer(0, "_TriangleBuffer", _TriangleBuffer);
+		TriangulationCS.SetBuffer(0, "_CounterBuffer", _CounterBuffer);
 		_TriangleBuffer.SetCounterValue(0);
+		_CounterBuffer.SetCounterValue(0);
 		TriangulationCS.Dispatch(0, Resolution / 8, Resolution / 8, Resolution / 8);
+		int[] args = new int[] { 0, 1, 0, 0 };
+		_IndirectBuffer.SetData(args);
+		ComputeBuffer.CopyCount(_CounterBuffer, _IndirectBuffer, 0);
 		_Material.SetFloat("_Scale", Scale);
 		_Material.SetBuffer("_TriangleBuffer", _TriangleBuffer);
 		_Material.SetInt("_ShowNormals", System.Convert.ToInt32(ShowNormals));
 		_Material.SetInt("_Wireframe", System.Convert.ToInt32(Wireframe));
-		int[] args = new int[] { 0, 1, 0, 0 };
-		_IndirectBuffer.SetData(args);
-		ComputeBuffer.CopyCount(_TriangleBuffer, _IndirectBuffer, 0);
-		_IndirectBuffer.GetData(args);
-		args[0] *= 3;
-		_IndirectBuffer.SetData(args);
-		_Count = args[0];
 		_Material.SetPass(0);
 		Graphics.DrawProceduralIndirectNow(MeshTopology.Triangles, _IndirectBuffer);
 	}
 
 	void OnDestroy()
 	{
-		_TriangleBuffer.Release();
-		_IndirectBuffer.Release();
-		_VolumeTexture.Release();
-		Destroy(_Material);
+		if (_TriangleBuffer != null) _TriangleBuffer.Release();
+		if (_IndirectBuffer != null) _IndirectBuffer.Release();
+		if (_CounterBuffer != null) _CounterBuffer.Release();
+		if (_VolumeTexture != null) _VolumeTexture.Release();
+		if (_Material != null) Destroy(_Material);
 	}
 }

@@ -17,6 +17,7 @@ struct Triangle
 };
 
 AppendStructuredBuffer<Triangle> _TriangleBuffer;
+RWStructuredBuffer<uint> _CounterBuffer;
 SamplerState _LinearClamp;
 
 static const int edgeTable[256] = {
@@ -358,7 +359,7 @@ void CSMain(uint3 threadId : SV_DispatchThreadID)
 		p[7] = (threadId + float3(0, 1, 0)) / (_Resolution - 1) + offset
 	};
 
-	float val[8] = 
+	float values[8] = 
 	{
 		SampleData(threadId + int3(0, 0, 1)),
 		SampleData(threadId + int3(1, 0, 1)),
@@ -371,43 +372,43 @@ void CSMain(uint3 threadId : SV_DispatchThreadID)
 	};
 
 	int cubeIndex = 0;
-	if (val[0] < _Threshold) cubeIndex |= 1;
-	if (val[1] < _Threshold) cubeIndex |= 2;
-	if (val[2] < _Threshold) cubeIndex |= 4;
-	if (val[3] < _Threshold) cubeIndex |= 8;
-	if (val[4] < _Threshold) cubeIndex |= 16;
-	if (val[5] < _Threshold) cubeIndex |= 32;
-	if (val[6] < _Threshold) cubeIndex |= 64;
-	if (val[7] < _Threshold) cubeIndex |= 128;
+	if (values[0] < _Threshold) cubeIndex |= 1;
+	if (values[1] < _Threshold) cubeIndex |= 2;
+	if (values[2] < _Threshold) cubeIndex |= 4;
+	if (values[3] < _Threshold) cubeIndex |= 8;
+	if (values[4] < _Threshold) cubeIndex |= 16;
+	if (values[5] < _Threshold) cubeIndex |= 32;
+	if (values[6] < _Threshold) cubeIndex |= 64;
+	if (values[7] < _Threshold) cubeIndex |= 128;
 
-	float3 vertlist[12];
+	float3 vertices[12];
 
 	if (edgeTable[cubeIndex] != 0)
 	{
 		if (edgeTable[cubeIndex] & 1)
-			vertlist[0] = Lerp(p[0], p[1], val[0], val[1]);
+			vertices[0] = Lerp(p[0], p[1], values[0], values[1]);
 		if (edgeTable[cubeIndex] & 2)
-			vertlist[1] = Lerp(p[1], p[2], val[1], val[2]);
+			vertices[1] = Lerp(p[1], p[2], values[1], values[2]);
 		if (edgeTable[cubeIndex] & 4)
-			vertlist[2] = Lerp(p[2], p[3], val[2], val[3]);
+			vertices[2] = Lerp(p[2], p[3], values[2], values[3]);
 		if (edgeTable[cubeIndex] & 8)
-			vertlist[3] = Lerp(p[3], p[0], val[3], val[0]);
+			vertices[3] = Lerp(p[3], p[0], values[3], values[0]);
 		if (edgeTable[cubeIndex] & 16)
-			vertlist[4] = Lerp(p[4], p[5], val[4], val[5]);
+			vertices[4] = Lerp(p[4], p[5], values[4], values[5]);
 		if (edgeTable[cubeIndex] & 32)
-			vertlist[5] = Lerp(p[5], p[6], val[5], val[6]);
+			vertices[5] = Lerp(p[5], p[6], values[5], values[6]);
 		if (edgeTable[cubeIndex] & 64)
-			vertlist[6] = Lerp(p[6], p[7], val[6], val[7]);
+			vertices[6] = Lerp(p[6], p[7], values[6], values[7]);
 		if (edgeTable[cubeIndex] & 128)
-			vertlist[7] = Lerp(p[7], p[4], val[7], val[4]);
+			vertices[7] = Lerp(p[7], p[4], values[7], values[4]);
 		if (edgeTable[cubeIndex] & 256)
-			vertlist[8] = Lerp(p[0], p[4], val[0], val[4]);
+			vertices[8] = Lerp(p[0], p[4], values[0], values[4]);
 		if (edgeTable[cubeIndex] & 512)
-			vertlist[9] = Lerp(p[1], p[5], val[1], val[5]);
+			vertices[9] = Lerp(p[1], p[5], values[1], values[5]);
 		if (edgeTable[cubeIndex] & 1024)
-			vertlist[10] = Lerp(p[2], p[6], val[2], val[6]);
+			vertices[10] = Lerp(p[2], p[6], values[2], values[6]);
 		if (edgeTable[cubeIndex] & 2048)
-			vertlist[11] = Lerp(p[3], p[7], val[3], val[7]);
+			vertices[11] = Lerp(p[3], p[7], values[3], values[7]);
 
 		for (int i = 0; triTable[cubeIndex][i] != -1; i += 3) 
 		{
@@ -415,9 +416,9 @@ void CSMain(uint3 threadId : SV_DispatchThreadID)
 			Point v0;
 			Point v1;
 			Point v2;
-			v0.position = vertlist[triTable[cubeIndex][i]];
-			v1.position = vertlist[triTable[cubeIndex][i + 1]];
-			v2.position = vertlist[triTable[cubeIndex][i + 2]];
+			v0.position = vertices[triTable[cubeIndex][i]];
+			v1.position = vertices[triTable[cubeIndex][i + 1]];
+			v2.position = vertices[triTable[cubeIndex][i + 2]];
 			v0.normal = normalize(CalculateGradient(v0.position));
 			v1.normal = normalize(CalculateGradient(v1.position));
 			v2.normal = normalize(CalculateGradient(v2.position));
@@ -428,6 +429,9 @@ void CSMain(uint3 threadId : SV_DispatchThreadID)
 			patch.vertex[1] = v1;
 			patch.vertex[2] = v2;
 			_TriangleBuffer.Append(patch);
+			_CounterBuffer.IncrementCounter();
+			_CounterBuffer.IncrementCounter();
+			_CounterBuffer.IncrementCounter();
 		}
 	}
 }
