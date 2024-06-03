@@ -2,7 +2,7 @@
 
 Author: Przemyslaw Zaworski
  
-Licence: Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.
+Licence: MIT
 
 Open the scene: Scenes/Main. Play. Click "Export" to save object as asset. Tested with Unity 2019.4.17f1
 
